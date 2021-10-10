@@ -1,14 +1,11 @@
+mod meter_layer;
+
 use axum::body::Body;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::Response;
 use axum::{handler::get, Router};
-use opentelemetry::metrics::MeterProvider;
-use opentelemetry::KeyValue;
 use opentelemetry_prometheus::PrometheusExporter;
 use prometheus::{Encoder, TextEncoder};
-use std::time::Duration;
-use tower_http::trace::TraceLayer;
-use tracing::Span;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, Registry};
 
@@ -50,26 +47,14 @@ async fn prometheus(prometheus_exporter: PrometheusExporter) -> Response<Body> {
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let prometheus_exporter = init_telemetry()?;
-    let meter = opentelemetry::global::meter_provider().meter("http_server_requests", None);
-    let server_request_recorder = meter
-        .f64_value_recorder("http_server_requests_seconds")
-        .with_description("Server request timing")
-        .init();
     let app = Router::new()
         .route(
             "/prometheus",
             get(|| async { prometheus(prometheus_exporter).await }),
         )
         .route("/api/hello", get(hello))
-        .layer(TraceLayer::new_for_http().on_response(
-            move |response: &Response<_>, latency: Duration, _span: &Span| {
-                let attributes = [
-                    KeyValue::new("status", response.status().as_str().to_string()),
-                    // KeyValue::new("path", ???),
-                    // KeyValue::new("method", ???),
-                ];
-                server_request_recorder.record(latency.as_secs_f64(), &attributes);
-            },
+        .layer(meter_layer::MeterLayer::new(
+            opentelemetry::global::meter_provider(),
         ));
 
     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
