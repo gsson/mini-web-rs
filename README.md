@@ -9,3 +9,7 @@ $ cargo run
 ```
 
 It will listen for requests on port 3000.
+
+Prometheus metrics on `/prometheus`
+
+Important high value business logic on `/api/hello/:name`
