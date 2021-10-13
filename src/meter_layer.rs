@@ -11,7 +11,7 @@ use tower_service::Service;
 
 #[derive(Clone)]
 pub struct MeterLayer {
-    meter: ValueRecorder<f64>,
+    value_recorder: ValueRecorder<f64>,
 }
 
 struct RequestAttributes {
@@ -23,13 +23,13 @@ struct RequestAttributes {
 
 impl MeterLayer {
     pub fn new<P: MeterProvider>(meter_provider: P) -> Self {
-        let meter = meter_provider
-            .meter("request_metrics", None)
+        let value_recorder = meter_provider
+            .meter("http_server_requests", None)
             .f64_value_recorder("http_server_requests_seconds")
-            .with_description("Server request timing")
+            .with_description("Server request metrics")
             .init();
 
-        Self { meter }
+        Self { value_recorder }
     }
 }
 
@@ -37,19 +37,19 @@ impl<S> Layer<S> for MeterLayer {
     type Service = MeterService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        MeterService::new(inner, self.meter.clone())
+        MeterService::new(inner, self.value_recorder.clone())
     }
 }
 
 #[derive(Clone)]
 pub struct MeterService<S> {
     inner: S,
-    meter: ValueRecorder<f64>,
+    value_recorder: ValueRecorder<f64>,
 }
 
 impl<S> MeterService<S> {
-    pub fn new(inner: S, meter: ValueRecorder<f64>) -> Self {
-        Self { inner, meter }
+    pub fn new(inner: S, value_recorder: ValueRecorder<f64>) -> Self {
+        Self { inner, value_recorder }
     }
 }
 
@@ -68,7 +68,7 @@ where
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         ResponseFuture {
-            meter: self.meter.clone(),
+            value_recorder: self.value_recorder.clone(),
             attributes: Some(RequestAttributes {
                 uri: req.uri().clone(),
                 method: req.method().clone(),
@@ -81,7 +81,7 @@ where
 
 #[pin_project]
 pub struct ResponseFuture<F> {
-    meter: ValueRecorder<f64>,
+    value_recorder: ValueRecorder<f64>,
     attributes: Option<RequestAttributes>,
     #[pin]
     future: F,
@@ -117,7 +117,7 @@ where
                 KeyValue::new("status", status.to_string()),
             ];
 
-            this.meter.record(elapsed.as_secs_f64(), &attributes);
+            this.value_recorder.record(elapsed.as_secs_f64(), &attributes);
         }
         Poll::Ready(Ok(res))
     }
