@@ -1,4 +1,4 @@
-use axum::http::{Request, Response};
+use axum::http::{Method, Request, Response, Uri};
 use opentelemetry::metrics::{MeterProvider, ValueRecorder};
 use opentelemetry::KeyValue;
 use pin_project::pin_project;
@@ -13,6 +13,13 @@ use tower_service::Service;
 pub struct MeterLayer {
     meter: ValueRecorder<f64>,
 }
+
+struct RequestAttributes {
+    uri: Uri,
+    method: Method,
+    start_time: Instant,
+}
+
 
 impl MeterLayer {
     pub fn new<P: MeterProvider>(meter_provider: P) -> Self {
@@ -62,11 +69,11 @@ where
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         ResponseFuture {
             meter: self.meter.clone(),
-            attributes: Some((
-                req.uri().to_string(),
-                req.method().to_string(),
-                Instant::now(),
-            )),
+            attributes: Some(RequestAttributes {
+                uri: req.uri().clone(),
+                method: req.method().clone(),
+                start_time: Instant::now(),
+            }),
             future: self.inner.call(req),
         }
     }
@@ -74,8 +81,8 @@ where
 
 #[pin_project]
 pub struct ResponseFuture<F> {
-    attributes: Option<(String, String, Instant)>,
     meter: ValueRecorder<f64>,
+    attributes: Option<RequestAttributes>,
     #[pin]
     future: F,
 }
@@ -89,25 +96,25 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         let res = ready!(this.future.poll(cx)?);
-        if let Some((uri, method, start_time)) = this.attributes.take() {
-            let end_time = Instant::now();
-            let elapsed = end_time - start_time;
+        if let Some(RequestAttributes { uri, method, start_time }) = this.attributes.take() {
+            let elapsed = start_time.elapsed();
             let status = res.status();
+            let requested_uri = uri.to_string();
 
             let elapsed_millis = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
             tracing::info!(
                 status = status.as_str(),
                 elapsed_time = elapsed_millis,
                 method = method.as_str(),
-                requested_uri = uri.as_str(),
+                requested_uri = requested_uri.as_str(),
                 "Request complete: {}",
                 status
             );
 
             let attributes = [
-                KeyValue::new("uri", uri),
-                KeyValue::new("method", method),
-                KeyValue::new("status", status.as_str().to_string()),
+                KeyValue::new("uri", requested_uri),
+                KeyValue::new("method", method.to_string()),
+                KeyValue::new("status", status.to_string()),
             ];
 
             this.meter.record(elapsed.as_secs_f64(), &attributes);
