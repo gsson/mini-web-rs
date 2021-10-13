@@ -4,7 +4,7 @@ use opentelemetry::KeyValue;
 use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll};
 use std::time::Instant;
 use tower_layer::Layer;
 use tower_service::Service;
@@ -95,7 +95,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let res = ready!(this.future.poll(cx)?);
+        let res = this.future.poll(cx).ready()??;
         if let Some(RequestAttributes { uri, method, start_time }) = this.attributes.take() {
             let elapsed = start_time.elapsed();
             let status = res.status();
