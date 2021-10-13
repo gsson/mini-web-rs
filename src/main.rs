@@ -4,14 +4,15 @@ use axum::body::Body;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::Response;
 use axum::{handler::get, Router};
+use axum::extract::Path;
 use opentelemetry_prometheus::PrometheusExporter;
 use prometheus::{Encoder, TextEncoder};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, Registry};
 
 #[tracing::instrument]
-async fn hello() -> &'static str {
-    "Hello, World!"
+async fn hello(Path(name): Path<String>) -> String {
+    format!("Hello, {}!", name)
 }
 
 fn init_telemetry() -> Result<PrometheusExporter, anyhow::Error> {
@@ -52,7 +53,7 @@ async fn main() -> Result<(), anyhow::Error> {
             "/prometheus",
             get(|| async { prometheus(prometheus_exporter).await }),
         )
-        .route("/api/hello", get(hello))
+        .route("/api/hello/:name", get(hello))
         .layer(meter_layer::MeterLayer::new(
             opentelemetry::global::meter_provider(),
         ));
