@@ -114,7 +114,7 @@ where
             let attributes = [
                 KeyValue::new("uri", requested_uri),
                 KeyValue::new("method", method.to_string()),
-                KeyValue::new("status", status.to_string()),
+                KeyValue::new("status", status.as_u16() as i64),
             ];
 
             this.value_recorder.record(elapsed.as_secs_f64(), &attributes);
