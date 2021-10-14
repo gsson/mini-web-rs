@@ -20,7 +20,6 @@ struct RequestAttributes {
     start_time: Instant,
 }
 
-
 impl MeterLayer {
     pub fn new<P: MeterProvider>(meter_provider: P) -> Self {
         let value_recorder = meter_provider
@@ -49,7 +48,10 @@ pub struct MeterService<S> {
 
 impl<S> MeterService<S> {
     pub fn new(inner: S, value_recorder: ValueRecorder<f64>) -> Self {
-        Self { inner, value_recorder }
+        Self {
+            inner,
+            value_recorder,
+        }
     }
 }
 
@@ -96,7 +98,12 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         let res = this.future.poll(cx).ready()??;
-        if let Some(RequestAttributes { uri, method, start_time }) = this.attributes.take() {
+        if let Some(RequestAttributes {
+            uri,
+            method,
+            start_time,
+        }) = this.attributes.take()
+        {
             let elapsed = start_time.elapsed();
             let status = res.status();
             let requested_uri = uri.to_string();
@@ -117,7 +124,8 @@ where
                 KeyValue::new("status", status.as_u16() as i64),
             ];
 
-            this.value_recorder.record(elapsed.as_secs_f64(), &attributes);
+            this.value_recorder
+                .record(elapsed.as_secs_f64(), &attributes);
         }
         Poll::Ready(Ok(res))
     }

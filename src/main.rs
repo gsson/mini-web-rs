@@ -3,10 +3,10 @@
 mod meter_layer;
 
 use axum::body::Body;
+use axum::extract::Path;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::Response;
 use axum::{handler::get, Router};
-use axum::extract::Path;
 use opentelemetry_prometheus::PrometheusExporter;
 use prometheus::{Encoder, TextEncoder};
 use tracing_subscriber::prelude::*;
