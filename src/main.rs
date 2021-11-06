@@ -1,7 +1,10 @@
 #![feature(poll_ready)]
 
+mod json_logging;
 mod observability;
 
+use crate::json_logging::logstash::LogstashFormat;
+use crate::json_logging::DisplayLevelFilter;
 use axum::body::Body;
 use axum::extract::Path;
 use axum::http::header::CONTENT_TYPE;
@@ -14,14 +17,13 @@ use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
 
-#[tracing::instrument]
+#[tracing::instrument(skip_all)]
 async fn hello(Path(name): Path<String>) -> String {
     format!("Hello, {}!", name)
 }
 
-fn init_telemetry() -> Result<PrometheusExporter, anyhow::Error> {
-    let logger = tracing_subscriber::fmt::layer().compact();
-
+fn init_observability() -> Result<PrometheusExporter, anyhow::Error> {
+    let logger = json_logging::Layer::default();
     let telemetry = tracing_opentelemetry::layer();
 
     let prometheus_exporter = opentelemetry_prometheus::exporter().try_init()?;
@@ -51,7 +53,7 @@ async fn prometheus(prometheus_exporter: PrometheusExporter) -> Response<Body> {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let prometheus_exporter = init_telemetry()?;
+    let prometheus_exporter = init_observability()?;
     let app = Router::new()
         .route(
             "/prometheus",
