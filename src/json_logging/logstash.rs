@@ -149,7 +149,7 @@ where
     stack_trace
 }
 
-const RESERVED_NAMES: [&'static str; 8] = [
+const RESERVED_NAMES: [&str; 8] = [
     "@version",
     "@timestamp",
     "thread_name",
@@ -198,7 +198,7 @@ where
         }
 
         if self.display_level_value {
-            s.serialize_entry("level_value", &level_value(&event_level))?;
+            s.serialize_entry("level_value", &level_value(event_level))?;
         }
 
         if let Some(filter) = self.display_stack_trace {
@@ -208,7 +208,7 @@ where
         if let Some(filter) = self.display_span_list {
             s.serialize_entry(
                 "spans",
-                &SerializableSpanList(&self.span_format, &event, &ctx, filter),
+                &SerializableSpanList(&self.span_format, event, &ctx, filter),
             )?;
         }
 

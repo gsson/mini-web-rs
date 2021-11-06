@@ -3,8 +3,6 @@
 mod json_logging;
 mod observability;
 
-use crate::json_logging::logstash::LogstashFormat;
-use crate::json_logging::DisplayLevelFilter;
 use axum::body::Body;
 use axum::extract::Path;
 use axum::http::header::CONTENT_TYPE;

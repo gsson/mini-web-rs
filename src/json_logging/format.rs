@@ -48,7 +48,7 @@ impl DefaultSpanFormat {
     }
 }
 
-const RESERVED_SPAN_FIELDS: [&'static str; 5] = ["name", "target", "level", "file", "line"];
+const RESERVED_SPAN_FIELDS: [&str; 5] = ["name", "target", "level", "file", "line"];
 
 impl FormatSpan for DefaultSpanFormat {
     fn format_span<S, Span>(&self, serializer: S, span: &SpanRef<Span>) -> Result<S::Ok, S::Error>
