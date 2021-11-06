@@ -1,16 +1,18 @@
 #![feature(poll_ready)]
 
-mod meter_layer;
+mod observability;
 
 use axum::body::Body;
 use axum::extract::Path;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::Response;
-use axum::{handler::get, Router};
+use axum::routing::get;
+use axum::Router;
 use opentelemetry_prometheus::PrometheusExporter;
 use prometheus::{Encoder, TextEncoder};
+use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{EnvFilter, Registry};
+use tracing_subscriber::Registry;
 
 #[tracing::instrument]
 async fn hello(Path(name): Path<String>) -> String {
@@ -56,7 +58,7 @@ async fn main() -> Result<(), anyhow::Error> {
             get(|| async { prometheus(prometheus_exporter).await }),
         )
         .route("/api/hello/:name", get(hello))
-        .layer(meter_layer::MeterLayer::new(
+        .layer(observability::Layer::new(
             opentelemetry::global::meter_provider(),
         ));
 

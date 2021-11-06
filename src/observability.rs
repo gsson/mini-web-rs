@@ -1,3 +1,4 @@
+use axum::extract::MatchedPath;
 use axum::http::{Method, Request, Response, Uri};
 use opentelemetry::metrics::{MeterProvider, ValueRecorder};
 use opentelemetry::KeyValue;
@@ -6,21 +7,21 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
-use tower_layer::Layer;
 use tower_service::Service;
 
 #[derive(Clone)]
-pub struct MeterLayer {
+pub struct Layer {
     value_recorder: ValueRecorder<f64>,
 }
 
 struct RequestAttributes {
-    uri: Uri,
+    matched_path: Option<MatchedPath>,
+    requested_uri: Uri,
     method: Method,
     start_time: Instant,
 }
 
-impl MeterLayer {
+impl Layer {
     pub fn new<P: MeterProvider>(meter_provider: P) -> Self {
         let value_recorder = meter_provider
             .meter("http_server_requests", None)
@@ -32,7 +33,7 @@ impl MeterLayer {
     }
 }
 
-impl<S> Layer<S> for MeterLayer {
+impl<S> tower_layer::Layer<S> for Layer {
     type Service = MeterService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
@@ -69,10 +70,14 @@ where
     }
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
+        let matched_path = req.extensions().get::<MatchedPath>().cloned();
+        let requested_uri = req.uri().clone();
+
         ResponseFuture {
             value_recorder: self.value_recorder.clone(),
             attributes: Some(RequestAttributes {
-                uri: req.uri().clone(),
+                matched_path,
+                requested_uri,
                 method: req.method().clone(),
                 start_time: Instant::now(),
             }),
@@ -99,27 +104,45 @@ where
         let this = self.project();
         let res = this.future.poll(cx).ready()??;
         if let Some(RequestAttributes {
-            uri,
+            matched_path,
+            requested_uri,
             method,
             start_time,
         }) = this.attributes.take()
         {
             let elapsed = start_time.elapsed();
             let status = res.status();
-            let requested_uri = uri.to_string();
 
             let elapsed_millis = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
-            tracing::info!(
-                status = status.as_str(),
-                elapsed_time = elapsed_millis,
-                method = method.as_str(),
-                requested_uri = requested_uri.as_str(),
-                "Request complete: {}",
-                status
-            );
+            if let Some(matched_path) = &matched_path {
+                tracing::info!(
+                    status = status.as_str(),
+                    elapsed_time = elapsed_millis,
+                    method = %method,
+                    requested_uri = %requested_uri,
+                    matched_path = matched_path.as_str(),
+                    "Request complete: {}",
+                    status
+                );
+            } else {
+                tracing::info!(
+                    status = status.as_str(),
+                    elapsed_time = elapsed_millis,
+                    method = %method,
+                    requested_uri = %requested_uri,
+                    "Request complete: {}",
+                    status
+                );
+            }
+
+            let matched_path = if let Some(matched_path) = matched_path {
+                matched_path.as_str().to_string()
+            } else {
+                String::new()
+            };
 
             let attributes = [
-                KeyValue::new("uri", requested_uri),
+                KeyValue::new("uri", matched_path),
                 KeyValue::new("method", method.to_string()),
                 KeyValue::new("status", status.as_u16() as i64),
             ];

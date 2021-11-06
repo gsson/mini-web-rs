@@ -5,13 +5,13 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
-axum = "0"
+axum = { version = "0" }
 anyhow = "1"
 tower-http = { version = "0", features = ["trace"] }
 tower-layer = { version = "0" }
 tower-service = { version = "0" }
 tracing = "0.1"
-tracing-subscriber = "0.2"
+tracing-subscriber = { version = "0", features = [ "env-filter" ] }
 tracing-opentelemetry = "0"
 opentelemetry = "0"
 opentelemetry-prometheus = "0"
