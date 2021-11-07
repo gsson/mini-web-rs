@@ -1,4 +1,4 @@
-use crate::json_logging::{DisplayLevelFilter, RecordedFields};
+use crate::json_logging::{DisplayLevelFilter, FieldRecorder};
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Serialize, Serializer};
 use std::collections::HashSet;
@@ -70,7 +70,7 @@ impl FormatSpan for DefaultSpanFormat {
             }
         }
         if self.display_fields {
-            if let Some(fields) = span.extensions().get::<RecordedFields>() {
+            if let Some(fields) = span.extensions().get::<FieldRecorder>() {
                 write_extension_fields(&mut HashSet::from(RESERVED_SPAN_FIELDS), &mut s, fields)?;
             }
         }
@@ -81,7 +81,7 @@ impl FormatSpan for DefaultSpanFormat {
 pub(crate) fn write_extension_fields<S: SerializeMap>(
     seen: &mut HashSet<&str>,
     serialize_map: &mut S,
-    fields: &RecordedFields,
+    fields: &FieldRecorder,
 ) -> Result<(), S::Error> {
     for field in fields {
         if seen.insert(field.0) {

@@ -1,7 +1,7 @@
 use crate::json_logging::format::{
     write_extension_fields, DefaultSpanFormat, FormatEvent, FormatSpan, SerializableSpanList,
 };
-use crate::json_logging::{DisplayLevelFilter, RecordedFields};
+use crate::json_logging::{DisplayLevelFilter, FieldRecorder};
 use serde::ser::SerializeMap as _;
 use serde::Serializer;
 use std::collections::HashSet;
@@ -214,12 +214,12 @@ where
 
         let mut seen = HashSet::from(RESERVED_NAMES);
 
-        let event_fields = RecordedFields::from_event(self, event);
+        let event_fields = FieldRecorder::from_event(self, event);
 
         write_extension_fields(&mut seen, &mut s, &event_fields)?;
         if let Some(scope) = ctx.event_scope(event) {
             for span in scope {
-                if let Some(span_fields) = span.extensions().get::<RecordedFields>() {
+                if let Some(span_fields) = span.extensions().get::<FieldRecorder>() {
                     write_extension_fields(&mut seen, &mut s, span_fields)?;
                 }
             }
