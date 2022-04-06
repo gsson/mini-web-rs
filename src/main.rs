@@ -1,5 +1,3 @@
-#![feature(poll_ready)]
-
 mod observability;
 
 use axum::body::Body;

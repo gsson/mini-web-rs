@@ -102,7 +102,11 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let res = this.future.poll(cx).ready()??;
+        let res = match this.future.poll(cx) {
+            Poll::Ready(t) => t?,
+            Poll::Pending => return Poll::Pending
+        };
+
         if let Some(RequestAttributes {
             matched_path,
             requested_uri,
