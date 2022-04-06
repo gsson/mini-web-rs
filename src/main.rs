@@ -1,6 +1,5 @@
 #![feature(poll_ready)]
 
-mod json_logging;
 mod observability;
 
 use axum::body::Body;
@@ -11,6 +10,7 @@ use axum::routing::get;
 use axum::Router;
 use opentelemetry_prometheus::PrometheusExporter;
 use prometheus::{Encoder, TextEncoder};
+use tracing_logstash::logstash::LogstashFormat;
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
@@ -21,7 +21,10 @@ async fn hello(Path(name): Path<String>) -> String {
 }
 
 fn init_observability() -> Result<PrometheusExporter, anyhow::Error> {
-    let logger = json_logging::Layer::default();
+    let logger = tracing_logstash::Layer::default()
+        .event_format(LogstashFormat::default()
+            .with_timestamp(false)
+            .with_version(false));
     let telemetry = tracing_opentelemetry::layer();
 
     let prometheus_exporter = opentelemetry_prometheus::exporter().try_init()?;
