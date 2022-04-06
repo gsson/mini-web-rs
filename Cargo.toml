@@ -16,6 +16,6 @@ tracing-opentelemetry = "0"
 tracing-logstash = "0.3"
 opentelemetry = "0"
 opentelemetry-prometheus = "0"
-prometheus = "0.12"
+prometheus = "0.13"
 pin-project = "1"
 time = { version = "0.3", default-features = false, features = [ "std", "formatting" ] }
