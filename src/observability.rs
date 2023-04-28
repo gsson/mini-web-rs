@@ -104,7 +104,7 @@ where
         let this = self.project();
         let res = match this.future.poll(cx) {
             Poll::Ready(t) => t?,
-            Poll::Pending => return Poll::Pending
+            Poll::Pending => return Poll::Pending,
         };
 
         if let Some(RequestAttributes {

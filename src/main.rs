@@ -19,10 +19,11 @@ async fn hello(Path(name): Path<String>) -> String {
 }
 
 fn init_observability() -> Result<PrometheusExporter, anyhow::Error> {
-    let logger = tracing_logstash::Layer::default()
-        .event_format(LogstashFormat::default()
+    let logger = tracing_logstash::Layer::default().event_format(
+        LogstashFormat::default()
             .with_timestamp(false)
-            .with_version(false));
+            .with_version(false),
+    );
     let telemetry = tracing_opentelemetry::layer();
 
     let prometheus_exporter = opentelemetry_prometheus::exporter().try_init()?;
