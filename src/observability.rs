@@ -1,6 +1,6 @@
 use axum::extract::MatchedPath;
 use axum::http::{Method, Request, Response, Uri};
-use opentelemetry::metrics::{MeterProvider, ValueRecorder};
+use opentelemetry::metrics::{Histogram, MeterProvider, Unit};
 use opentelemetry::KeyValue;
 use pin_project::pin_project;
 use std::future::Future;
@@ -11,7 +11,7 @@ use tower_service::Service;
 
 #[derive(Clone)]
 pub struct Layer {
-    value_recorder: ValueRecorder<f64>,
+    http_server_requests_seconds: Histogram<f64>,
 }
 
 struct RequestAttributes {
@@ -23,13 +23,14 @@ struct RequestAttributes {
 
 impl Layer {
     pub fn new<P: MeterProvider>(meter_provider: P) -> Self {
-        let value_recorder = meter_provider
-            .meter("http_server_requests", None)
-            .f64_value_recorder("http_server_requests_seconds")
+        let http_server_requests_seconds = meter_provider
+            .meter("http_server_requests")
+            .f64_histogram("http_server_requests_seconds")
+            .with_unit(Unit::new("seconds"))
             .with_description("Server request metrics")
             .init();
 
-        Self { value_recorder }
+        Self { http_server_requests_seconds }
     }
 }
 
@@ -37,21 +38,21 @@ impl<S> tower_layer::Layer<S> for Layer {
     type Service = MeterService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        MeterService::new(inner, self.value_recorder.clone())
+        MeterService::new(inner, self.http_server_requests_seconds.clone())
     }
 }
 
 #[derive(Clone)]
 pub struct MeterService<S> {
     inner: S,
-    value_recorder: ValueRecorder<f64>,
+    http_server_requests_seconds: Histogram<f64>,
 }
 
 impl<S> MeterService<S> {
-    pub fn new(inner: S, value_recorder: ValueRecorder<f64>) -> Self {
+    pub fn new(inner: S, http_server_requests_seconds: Histogram<f64>) -> Self {
         Self {
             inner,
-            value_recorder,
+            http_server_requests_seconds,
         }
     }
 }
@@ -74,7 +75,7 @@ where
         let requested_uri = req.uri().clone();
 
         ResponseFuture {
-            value_recorder: self.value_recorder.clone(),
+            http_server_requests_seconds: self.http_server_requests_seconds.clone(),
             attributes: Some(RequestAttributes {
                 matched_path,
                 requested_uri,
@@ -88,7 +89,7 @@ where
 
 #[pin_project]
 pub struct ResponseFuture<F> {
-    value_recorder: ValueRecorder<f64>,
+    http_server_requests_seconds: Histogram<f64>,
     attributes: Option<RequestAttributes>,
     #[pin]
     future: F,
@@ -151,8 +152,10 @@ where
                 KeyValue::new("status", status.as_u16() as i64),
             ];
 
-            this.value_recorder
-                .record(elapsed.as_secs_f64(), &attributes);
+            let context = opentelemetry::Context::current();
+
+            this.http_server_requests_seconds
+                .record(&context, elapsed.as_secs_f64(), &attributes);
         }
         Poll::Ready(Ok(res))
     }

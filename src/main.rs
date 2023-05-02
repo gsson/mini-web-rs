@@ -1,11 +1,16 @@
 mod observability;
 
+use std::sync::Arc;
 use axum::body::Body;
 use axum::extract::Path;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::Response;
 use axum::routing::get;
 use axum::Router;
+use opentelemetry::sdk::export::metrics::{aggregation, AggregatorSelector};
+use opentelemetry::sdk::metrics::{aggregators, controllers, processors};
+use opentelemetry::sdk::metrics::aggregators::Aggregator;
+use opentelemetry::sdk::metrics::sdk_api::Descriptor;
 use opentelemetry_prometheus::PrometheusExporter;
 use prometheus::{Encoder, TextEncoder};
 use tracing_logstash::logstash::LogstashFormat;
@@ -18,15 +23,36 @@ async fn hello(Path(name): Path<String>) -> String {
     format!("Hello, {}!", name)
 }
 
+struct MiniWebAggregatorSelector;
+impl AggregatorSelector for MiniWebAggregatorSelector {
+    fn aggregator_for(&self, descriptor: &Descriptor) -> Option<Arc<dyn Aggregator + Send + Sync>> {
+        match descriptor.name() {
+            "http_server_requests_seconds" => Some(Arc::new(aggregators::histogram(
+                &[0.01, 0.05, 0.1, 0.5, 1.0, 5.0]
+            ))),
+            _ => Some(Arc::new(aggregators::sum())),
+        }
+    }
+}
+
 fn init_observability() -> Result<PrometheusExporter, anyhow::Error> {
     let logger = tracing_logstash::Layer::default().event_format(
         LogstashFormat::default()
             .with_timestamp(false)
             .with_version(false),
     );
-    let telemetry = tracing_opentelemetry::layer();
+    let controller = controllers::basic(
+        processors::factory(
+            MiniWebAggregatorSelector,
+            aggregation::cumulative_temporality_selector(),
+        )
+            .with_memory(true),
+    )
+        .build();
+    let prometheus_exporter = opentelemetry_prometheus::exporter(controller)
+        .try_init()?;
 
-    let prometheus_exporter = opentelemetry_prometheus::exporter().try_init()?;
+    let telemetry = tracing_opentelemetry::layer();
 
     let env_filter = EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new("info"))?;
     let collector = Registry::default()
