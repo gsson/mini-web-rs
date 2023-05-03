@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
-axum = { version = "0" }
+axum = { version = "0", features = ["headers"] }
 anyhow = "1"
-tower-http = { version = "0" }
+tower-http = { version = "0", features = ["catch-panic", "propagate-header"] }
 tower-layer = { version = "0" }
 tower-service = { version = "0" }
 tracing = "0.1"
@@ -19,3 +19,6 @@ opentelemetry-prometheus = { version = "0.11" } # Keep in sync with `tracing-ope
 prometheus = "0.13" # Keep in sync with `opentelemetry-prometheus`
 pin-project = "1"
 time = { version = "0.3", default-features = false, features = [ "std", "formatting" ] }
+rusty_ulid = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }

@@ -30,7 +30,9 @@ impl Layer {
             .with_description("Server request metrics")
             .init();
 
-        Self { http_server_requests_seconds }
+        Self {
+            http_server_requests_seconds,
+        }
     }
 }
 
