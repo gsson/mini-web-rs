@@ -20,7 +20,9 @@ use prometheus::{Encoder, TextEncoder};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use std::any::Any;
+use std::backtrace::Backtrace;
 use std::sync::Arc;
+use tracing::error;
 use tracing_logstash::logstash::LogstashFormat;
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::prelude::*;
@@ -184,6 +186,9 @@ impl tower_http::catch_panic::ResponseForPanic for MyPanicHandler {
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let prometheus_exporter = init_observability()?;
+    std::panic::set_hook(Box::new(|panic_info| {
+        error!(stack_trace=%Backtrace::capture(), "{}", panic_info);
+    }));
     let app = Router::new()
         .route(
             "/prometheus",
