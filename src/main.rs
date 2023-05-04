@@ -1,5 +1,6 @@
 mod correlation_id;
 mod observability;
+mod panics;
 
 use crate::correlation_id::{CorrelationId, CorrelationIdLayer};
 use axum::body::{Body, BoxBody, HttpBody};
@@ -20,11 +21,11 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use std::any::Any;
 use std::sync::Arc;
-use tower_http::catch_panic::CatchPanicLayer;
 use tracing_logstash::logstash::LogstashFormat;
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
+use crate::panics::PanicHandlerLayer;
 
 #[derive(Serialize)]
 struct Hello {
@@ -190,7 +191,7 @@ async fn main() -> Result<(), anyhow::Error> {
         )
         .route("/api/hello/:name", get(hello))
         .route("/api/panic/:name", get(danger))
-        .layer(CatchPanicLayer::custom(MyPanicHandler))
+        .layer(PanicHandlerLayer)
         .layer(observability::Layer::new(
             opentelemetry::global::meter_provider(),
         ))

@@ -467,6 +467,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "bytes",
+ "futures-util",
+ "http-body",
  "opentelemetry",
  "opentelemetry-prometheus",
  "pin-project",
