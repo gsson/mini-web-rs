@@ -3,12 +3,11 @@ mod observability;
 mod panics;
 
 use crate::correlation_id::{CorrelationId, CorrelationIdLayer};
-use axum::body::{Body, BoxBody, HttpBody};
+use crate::panics::PanicHandlerLayer;
+use axum::body::Body;
 use axum::extract::Path;
-use axum::headers::Header;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
-use axum::http::{Response, StatusCode};
-use axum::response::IntoResponse;
+use axum::http::Response;
 use axum::routing::get;
 use axum::{Extension, Json, Router};
 use opentelemetry::sdk::export::metrics::{aggregation, AggregatorSelector};
@@ -17,66 +16,20 @@ use opentelemetry::sdk::metrics::sdk_api::Descriptor;
 use opentelemetry::sdk::metrics::{aggregators, controllers, processors};
 use opentelemetry_prometheus::PrometheusExporter;
 use prometheus::{Encoder, TextEncoder};
-use serde::ser::SerializeStruct;
-use serde::{Serialize, Serializer};
-use std::any::Any;
+use serde::Serialize;
 use std::backtrace::Backtrace;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::error;
 use tracing_logstash::logstash::LogstashFormat;
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
-use crate::panics::PanicHandlerLayer;
 
 #[derive(Serialize)]
 struct Hello {
     message: &'static str,
     name: String,
-}
-
-struct ErrorResponse {
-    status: StatusCode,
-    message: String,
-    correlation_id: Option<CorrelationId>,
-}
-
-impl IntoResponse for ErrorResponse {
-    fn into_response(self) -> axum::response::Response {
-        let mut builder = Response::builder()
-            .header(CONTENT_TYPE, "application/json")
-            .status(self.status);
-
-        if let Some(correlation_id) = self
-            .correlation_id.as_ref()
-            .and_then(|correlation_id| correlation_id.header_value().ok())
-        {
-            builder = builder.header(CorrelationId::name(), correlation_id);
-        }
-
-        let body = serde_json::to_vec(&self).expect("Failed to serialize error response");
-        let body = Body::from(body)
-            .map_err(axum::Error::new)
-            .boxed_unsync();
-
-        builder.body(body).unwrap()
-    }
-}
-
-impl Serialize for ErrorResponse {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let len = if self.correlation_id.is_some() { 3 } else { 2 };
-        let mut s = serializer.serialize_struct("ErrorResponse", len)?;
-        s.serialize_field("status", &self.status.as_u16())?;
-        s.serialize_field("message", &self.message)?;
-        if let Some(correlation_id) = &self.correlation_id {
-            s.serialize_field("correlation_id", &correlation_id.0)?;
-        }
-        s.end()
-    }
 }
 
 #[tracing::instrument(skip_all)]
@@ -148,39 +101,6 @@ async fn prometheus(prometheus_exporter: PrometheusExporter) -> Response<Body> {
         .header(CACHE_CONTROL, "no-cache")
         .body(Body::from(buffer))
         .unwrap()
-}
-
-#[derive(Copy, Clone)]
-struct MyPanicHandler;
-
-impl MyPanicHandler {
-    fn message(err: Box<dyn Any + Send + 'static>) -> String {
-        if let Some(s) = err.downcast_ref::<String>() {
-            s.clone()
-        } else if let Some(s) = err.downcast_ref::<&str>() {
-            s.to_string()
-        } else {
-            StatusCode::INTERNAL_SERVER_ERROR.to_string()
-        }
-    }
-}
-
-impl tower_http::catch_panic::ResponseForPanic for MyPanicHandler {
-    type ResponseBody = BoxBody;
-
-    fn response_for_panic(
-        &mut self,
-        err: Box<dyn Any + Send + 'static>,
-    ) -> Response<Self::ResponseBody> {
-        let mut response = Json(ErrorResponse {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: Self::message(err),
-            correlation_id: None, // I guess I need to write my own handler to get access to that :/
-        })
-        .into_response();
-        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-        response
-    }
 }
 
 #[tokio::main]

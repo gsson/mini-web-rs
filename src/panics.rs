@@ -1,22 +1,18 @@
-use std::any::Any;
+use crate::correlation_id::CorrelationId;
+use axum::body::{Bytes, HttpBody};
 use axum::http::{Request, StatusCode};
-use axum::response::{Response};
+use axum::response::Response;
+use futures_util::future::{CatchUnwind, FutureExt};
+use http_api_problem::HttpApiProblem;
+use http_body::combinators::UnsyncBoxBody;
 use pin_project::pin_project;
+use std::any::Any;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
-use axum::body::{Body, Bytes, HttpBody};
-use axum::{BoxError};
-use axum::http::header::CONTENT_TYPE;
-use bytes::{BufMut, BytesMut};
-use futures_util::future::{CatchUnwind, FutureExt};
-use http_body::combinators::UnsyncBoxBody;
 use tower_layer::Layer;
 use tower_service::Service;
-use crate::correlation_id::CorrelationId;
-use crate::ErrorResponse;
-
 
 #[derive(Copy, Clone, Debug)]
 pub struct PanicHandlerLayer;
@@ -43,10 +39,10 @@ impl<S> PanicHandlerService<S> {
 impl<ReqBody, ResBody, S> Service<Request<ReqBody>> for PanicHandlerService<S>
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>>,
-    ResBody: HttpBody<Data=Bytes> + Send + 'static,
-    ResBody::Error: Into<BoxError>,
+    ResBody: HttpBody<Data = Bytes> + Send + 'static,
+    ResBody::Error: Into<axum::Error>,
 {
-    type Response = Response<UnsyncBoxBody<Bytes, BoxError>>;
+    type Response = Response<UnsyncBoxBody<Bytes, axum::Error>>;
     type Error = S::Error;
     type Future = ResponseFuture<S::Future>;
 
@@ -71,7 +67,10 @@ pub struct ResponseFuture<F> {
     kind: Kind<F>,
 }
 
-impl <F> ResponseFuture<F> where F: Future {
+impl<F> ResponseFuture<F>
+where
+    F: Future,
+{
     fn future(correlation_id: Option<CorrelationId>, future: F) -> Self {
         Self {
             correlation_id,
@@ -80,14 +79,18 @@ impl <F> ResponseFuture<F> where F: Future {
             },
         }
     }
-    fn panicked(correlation_id: Option<CorrelationId>, panic_err: Box<dyn Any + Send + 'static>) -> Self {
+    fn panicked(
+        correlation_id: Option<CorrelationId>,
+        panic_err: Box<dyn Any + Send + 'static>,
+    ) -> Self {
         Self {
             correlation_id,
-            kind: Kind::Panicked { panic_err: Some(panic_err) },
+            kind: Kind::Panicked {
+                panic_err: Some(panic_err),
+            },
         }
     }
 }
-
 
 #[pin_project(project = KindProj)]
 enum Kind<F> {
@@ -97,35 +100,36 @@ enum Kind<F> {
     Future {
         #[pin]
         future: CatchUnwind<AssertUnwindSafe<F>>,
-    }
+    },
 }
 
-
 impl<F, ResBody, E> Future for ResponseFuture<F>
-    where
-        F: Future<Output = Result<Response<ResBody>, E>>,
-        ResBody: HttpBody<Data=Bytes> + Send + 'static,
-        ResBody::Error: Into<BoxError>,
+where
+    F: Future<Output = Result<Response<ResBody>, E>>,
+    ResBody: HttpBody<Data = Bytes> + Send + 'static,
+    ResBody::Error: Into<axum::Error>,
 {
-    type Output = Result<Response<UnsyncBoxBody<Bytes, BoxError>>, E>;
+    type Output = Result<Response<UnsyncBoxBody<Bytes, axum::Error>>, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         match this.kind.project() {
-            KindProj::Panicked {
-                panic_err,
-            } => {
+            KindProj::Panicked { panic_err } => {
                 let panic_err = panic_err.take().expect("future polled after completion");
-                Poll::Ready(Ok(response_for_panic(this.correlation_id.clone(), panic_err)))
+                Poll::Ready(Ok(response_for_panic(
+                    this.correlation_id.as_ref(),
+                    panic_err,
+                )))
             }
-            KindProj::Future {
-                future,
-            } => match ready!(future.poll(cx)) {
+            KindProj::Future { future } => match ready!(future.poll(cx)) {
                 Ok(Ok(res)) => {
                     Poll::Ready(Ok(res.map(|body| body.map_err(Into::into).boxed_unsync())))
                 }
                 Ok(Err(svc_err)) => Poll::Ready(Err(svc_err)),
-                Err(panic_err) => Poll::Ready(Ok(response_for_panic(this.correlation_id.clone(), panic_err))),
+                Err(panic_err) => Poll::Ready(Ok(response_for_panic(
+                    this.correlation_id.as_ref(),
+                    panic_err,
+                ))),
             },
         }
     }
@@ -142,59 +146,15 @@ fn message(err: Box<dyn Any + Send + 'static>) -> String {
 }
 
 fn response_for_panic(
-    correlation_id: Option<CorrelationId>,
+    correlation_id: Option<&CorrelationId>,
     err: Box<dyn Any + Send + 'static>,
-) -> Response<UnsyncBoxBody<Bytes, BoxError>> {
-    let response = ErrorResponse {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        message: message(err),
-        correlation_id,
-    };
+) -> Response<UnsyncBoxBody<Bytes, axum::Error>> {
+    let mut problem =
+        HttpApiProblem::with_title_and_type(StatusCode::INTERNAL_SERVER_ERROR).detail(message(err));
 
-
-    let mut buf = BytesMut::with_capacity(128).writer();
-    serde_json::to_writer(&mut buf, &response).expect("failed to serialize error response");
-    let body = buf.into_inner().freeze();
-    let body = Body::from(body).map_err(Into::into).boxed_unsync();
-
-    Response::builder()
-        .status(StatusCode::INTERNAL_SERVER_ERROR)
-        .header(CONTENT_TYPE, "application/json")
-        .body(body)
-        .expect("failed to build error response")
-}
-
-
-
-
-/*
-
-#[pin_project]
-#[derive(Debug)]
-pub struct ResponseFuture<F> {
-    correlation_id: CorrelationId,
-    #[pin]
-    future: F,
-}
-
-impl<F, ResBody, E> Future for ResponseFuture<F>
-where
-    F: Future<Output = Result<Response<ResBody>, E>>,
-{
-    type Output = F::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let span = info_span!("correlation_id", correlation_id = %self.correlation_id);
-        let _guard = span.enter();
-        let this = self.project();
-        let mut res = ready!(this.future.poll(cx)?);
-
-        res.headers_mut().insert(
-            CorrelationId::name(),
-            this.correlation_id.header_value().unwrap(),
-        );
-
-        Poll::Ready(Ok(res))
+    if let Some(correlation_id) = correlation_id {
+        problem = problem.value("correlation_id", &correlation_id.0)
     }
+
+    problem.to_axum_response()
 }
-*/

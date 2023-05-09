@@ -25,3 +25,4 @@ serde_json = { version = "1" }
 futures-util = "0"
 http-body = "0.4"
 bytes = "1"
+http-api-problem = { version = "0", features = ["axum"] }
