@@ -10,6 +10,7 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::Response;
 use axum::routing::get;
 use axum::{Extension, Json, Router};
+use observability::ObservabilityLayer;
 use opentelemetry::sdk::export::metrics::{aggregation, AggregatorSelector};
 use opentelemetry::sdk::metrics::aggregators::Aggregator;
 use opentelemetry::sdk::metrics::sdk_api::Descriptor;
@@ -117,13 +118,11 @@ async fn main() -> Result<(), anyhow::Error> {
         .route("/api/hello/:name", get(hello))
         .route("/api/panic/:name", get(danger))
         .layer(PanicHandlerLayer)
-        .layer(observability::Layer::new(
-            opentelemetry::global::meter_provider(),
-        ))
+        .layer(ObservabilityLayer::global())
         .layer(CorrelationIdLayer);
 
     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
 
     opentelemetry::global::shutdown_tracer_provider();

@@ -26,9 +26,10 @@ And Logstash style JSON on stdout;
 {"@version":"1","@timestamp":"2021-11-06T19:19:40.650868+00:00","thread_name":"tokio-runtime-worker","logger_name":"mini_web::observability","level":"INFO","level_value":5,"requested_uri":"/metrics","method":"GET","elapsed_time":0,"status":"404","message":"Request complete: 404 Not Found"}
 ```
 
+
 ## todo!()
 
-* Additional request information in the logs (specific request headers, client IP and so on)
+* Additional request information in the logs (specific request headers etc)
 * Externalised configuration
 * Dockerisation
 * Kubernetes [Liveness, Readiness and Startup Probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)

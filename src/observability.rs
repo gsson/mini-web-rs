@@ -1,27 +1,32 @@
-use axum::extract::MatchedPath;
+use axum::extract::{ConnectInfo, MatchedPath};
 use axum::http::{Method, Request, Response, Uri};
 use opentelemetry::metrics::{Histogram, MeterProvider, Unit};
 use opentelemetry::KeyValue;
 use pin_project::pin_project;
 use std::future::Future;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
 use tower_service::Service;
 
 #[derive(Clone)]
-pub struct Layer {
+pub struct ObservabilityLayer {
     http_server_requests_seconds: Histogram<f64>,
 }
 
 struct RequestAttributes {
+    remote: Option<SocketAddr>,
     matched_path: Option<MatchedPath>,
     requested_uri: Uri,
     method: Method,
     start_time: Instant,
 }
 
-impl Layer {
+impl ObservabilityLayer {
+    pub fn global() -> Self {
+        Self::new(opentelemetry::global::meter_provider())
+    }
     pub fn new<P: MeterProvider>(meter_provider: P) -> Self {
         let http_server_requests_seconds = meter_provider
             .meter("http_server_requests")
@@ -36,7 +41,7 @@ impl Layer {
     }
 }
 
-impl<S> tower_layer::Layer<S> for Layer {
+impl<S> tower_layer::Layer<S> for ObservabilityLayer {
     type Service = MeterService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
@@ -75,10 +80,15 @@ where
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         let matched_path = req.extensions().get::<MatchedPath>().cloned();
         let requested_uri = req.uri().clone();
+        let remote = req
+            .extensions()
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|c| c.0);
 
         ResponseFuture {
             http_server_requests_seconds: self.http_server_requests_seconds.clone(),
             attributes: Some(RequestAttributes {
+                remote,
                 matched_path,
                 requested_uri,
                 method: req.method().clone(),
@@ -111,6 +121,7 @@ where
         };
 
         if let Some(RequestAttributes {
+            remote,
             matched_path,
             requested_uri,
             method,
@@ -121,8 +132,12 @@ where
             let status = res.status();
 
             let elapsed_millis = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+            let remote_host = remote
+                .map(|r| r.ip().to_string())
+                .unwrap_or_else(String::new);
             if let Some(matched_path) = &matched_path {
                 tracing::info!(
+                    remote_host = %remote_host,
                     status = status.as_str(),
                     elapsed_time = elapsed_millis,
                     method = %method,
@@ -133,6 +148,7 @@ where
                 );
             } else {
                 tracing::info!(
+                    remote_host = %remote_host,
                     status = status.as_str(),
                     elapsed_time = elapsed_millis,
                     method = %method,
