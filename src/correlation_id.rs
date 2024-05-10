@@ -1,6 +1,6 @@
-use axum::headers::{Error, Header, HeaderName, HeaderValue};
 use axum::http::Request;
 use axum::response::Response;
+use axum_extra::headers::{Error, Header, HeaderName, HeaderValue};
 use pin_project::pin_project;
 use rusty_ulid::generate_ulid_string;
 use std::fmt::{Display, Formatter};

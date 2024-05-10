@@ -4,25 +4,27 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
-axum = { version = "0", features = ["headers"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+axum = { version = "0.7", features = ["tracing"] }
+axum-extra = { version = "0.9", features = ["typed-header"] }
 anyhow = "1"
 tower-http = { version = "0", features = ["catch-panic", "propagate-header"] }
 tower-layer = { version = "0" }
 tower-service = { version = "0" }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }
-tracing-opentelemetry = "0"
-tracing-logstash = "0.5"
-opentelemetry = { version = "0.18", features = ["metrics"] } # Keep in sync with `tracing-opentelemetry`
-opentelemetry-prometheus = { version = "0.11" } # Keep in sync with `tracing-opentelemetry`
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-opentelemetry = "0.23"
+tracing-logstash = "0.7"
+opentelemetry = { version = "0.22", features = ["metrics"] } # Keep in sync with `tracing-opentelemetry`
+opentelemetry_sdk = { version = "0.22", features = ["metrics"] } # Keep in sync with `tracing-opentelemetry`
+opentelemetry-prometheus = { version = "0.15" } # Keep in sync with `tracing-opentelemetry`
 prometheus = "0.13" # Keep in sync with `opentelemetry-prometheus`
 pin-project = "1"
-time = { version = "0.3", default-features = false, features = [ "std", "formatting" ] }
+time = { version = "0.3", default-features = false, features = ["std", "formatting"] }
 rusty_ulid = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
 futures-util = "0"
-http-body = "0.4"
+http-body = "1"
 bytes = "1"
 http-api-problem = { version = "0", features = ["axum"] }

@@ -1,6 +1,6 @@
 use axum::extract::{ConnectInfo, MatchedPath};
 use axum::http::{Method, Request, Response, StatusCode, Uri};
-use opentelemetry::metrics::{Histogram, MeterProvider, Unit};
+use opentelemetry::metrics::{Histogram, Meter, MeterProvider, Unit};
 use opentelemetry::KeyValue;
 use pin_project::pin_project;
 use std::future::Future;
@@ -10,10 +10,7 @@ use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant};
 use tower_service::Service;
 
-#[derive(Clone)]
-pub struct ObservabilityLayer {
-    metrics: ServerMetrics,
-}
+pub const REQUEST_HISTOGRAM_NAME: &str = "http_server_requests_seconds";
 
 struct RequestAttributes {
     remote: Option<SocketAddr>,
@@ -23,14 +20,64 @@ struct RequestAttributes {
     start_time: Instant,
 }
 
+#[derive(Clone)]
+pub struct ServerMetrics {
+    histogram: Histogram<f64>,
+}
+
+#[inline]
+fn metric_attributes(request_attributes: &RequestAttributes, status: StatusCode) -> [KeyValue; 3] {
+    [
+        request_attributes
+            .matched_path
+            .as_ref()
+            .map(|matched| KeyValue::new("uri", matched.as_str().to_string()))
+            .unwrap_or_else(|| KeyValue::new("uri", "unknown")),
+        KeyValue::new("method", request_attributes.method.to_string()),
+        KeyValue::new("status", status.as_u16() as i64),
+    ]
+}
+
+impl ServerMetrics {
+    pub fn new(meter: &Meter) -> Self {
+        let histogram = meter
+            .f64_histogram(REQUEST_HISTOGRAM_NAME)
+            .with_unit(Unit::new("seconds"))
+            .with_description("Server request metrics")
+            .init();
+        Self { histogram }
+    }
+
+    fn record_request(
+        &self,
+        request_attributes: &RequestAttributes,
+        status: StatusCode,
+        elapsed: Duration,
+    ) {
+        self.histogram.record(
+            elapsed.as_secs_f64(),
+            &metric_attributes(request_attributes, status),
+        );
+    }
+}
+
+#[derive(Clone)]
+pub struct ObservabilityLayer {
+    _meter: Meter,
+    metrics: ServerMetrics,
+}
+
 impl ObservabilityLayer {
     pub fn global() -> Self {
         Self::new(opentelemetry::global::meter_provider())
     }
 
     pub fn new<P: MeterProvider>(meter_provider: P) -> Self {
+        let meter = meter_provider.meter(env!("CARGO_PKG_NAME"));
+        let metrics = ServerMetrics::new(&meter);
         Self {
-            metrics: ServerMetrics::new(meter_provider),
+            _meter: meter,
+            metrics,
         }
     }
 }
@@ -98,68 +145,6 @@ pub struct ResponseFuture<F> {
     future: F,
 }
 
-#[derive(Clone)]
-pub struct ServerMetrics {
-    histogram: Histogram<f64>,
-}
-
-impl ServerMetrics {
-    pub fn new<P: MeterProvider>(meter_provider: P) -> Self {
-        let histogram = meter_provider
-            .meter("http_server_requests")
-            .f64_histogram("http_server_requests_seconds")
-            .with_unit(Unit::new("seconds"))
-            .with_description("Server request metrics")
-            .init();
-        Self { histogram }
-    }
-
-    #[inline]
-    fn method(method: &Method) -> KeyValue {
-        KeyValue::new("method", method.to_string())
-    }
-
-    #[inline]
-    fn uri(matched_path: Option<&MatchedPath>) -> KeyValue {
-        matched_path
-            .map(|matched| KeyValue::new("uri", matched.as_str().to_string()))
-            .unwrap_or_else(|| KeyValue::new("uri", "unknown"))
-    }
-
-    #[inline]
-    fn status(status: StatusCode) -> KeyValue {
-        KeyValue::new("status", status.as_u16() as i64)
-    }
-
-    fn attributes(
-        method: &Method,
-        matched_path: Option<&MatchedPath>,
-        status: StatusCode,
-    ) -> [KeyValue; 3] {
-        [
-            Self::uri(matched_path),
-            Self::method(method),
-            Self::status(status),
-        ]
-    }
-
-    pub fn record_request(
-        &self,
-        method: &Method,
-        matched_path: Option<&MatchedPath>,
-        status: StatusCode,
-        elapsed: Duration,
-    ) {
-        let context = opentelemetry::Context::current();
-
-        self.histogram.record(
-            &context,
-            elapsed.as_secs_f64(),
-            &Self::attributes(method, matched_path, status),
-        );
-    }
-}
-
 impl<F, ResBody, E> Future for ResponseFuture<F>
 where
     F: Future<Output = Result<Response<ResBody>, E>>,
@@ -171,31 +156,26 @@ where
 
         let res = ready!(this.future.poll(cx)?);
 
-        if let Some(RequestAttributes {
-            remote,
-            matched_path,
-            requested_uri,
-            method,
-            start_time,
-        }) = this.attributes.take()
-        {
-            let elapsed = start_time.elapsed();
-            let status = res.status();
+        let attrs = this
+            .attributes
+            .take()
+            .expect("future polled after completion");
 
-            tracing::info!(
-                remote_host = remote.map(|r| r.ip().to_string()),
-                status = status.as_str(),
-                elapsed_time = u64::try_from(elapsed.as_millis()).ok(),
-                method = %method,
-                requested_uri = %requested_uri,
-                matched_path = matched_path.as_ref().map(|e| e.as_str().to_string()),
-                "Request complete: {}",
-                status
-            );
+        let elapsed = attrs.start_time.elapsed();
+        let status = res.status();
 
-            this.metrics
-                .record_request(&method, matched_path.as_ref(), status, elapsed);
-        }
+        tracing::info!(
+            remote_host = attrs.remote.map(|r| r.ip().to_string()),
+            status = status.as_str(),
+            elapsed_time = u64::try_from(elapsed.as_millis()).ok(),
+            method = %attrs.method,
+            requested_uri = %attrs.requested_uri,
+            matched_path = attrs.matched_path.as_ref().map(|e| e.as_str().to_string()),
+            "Request complete: {}",
+            status
+        );
+
+        this.metrics.record_request(&attrs, status, elapsed);
         Poll::Ready(Ok(res))
     }
 }

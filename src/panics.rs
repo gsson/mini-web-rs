@@ -1,10 +1,8 @@
 use crate::correlation_id::CorrelationId;
-use axum::body::{Bytes, HttpBody};
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
 use futures_util::future::{CatchUnwind, FutureExt};
 use http_api_problem::HttpApiProblem;
-use http_body::combinators::UnsyncBoxBody;
 use pin_project::pin_project;
 use std::any::Any;
 use std::future::Future;
@@ -36,13 +34,11 @@ impl<S> PanicHandlerService<S> {
     }
 }
 
-impl<ReqBody, ResBody, S> Service<Request<ReqBody>> for PanicHandlerService<S>
+impl<ReqBody, S> Service<Request<ReqBody>> for PanicHandlerService<S>
 where
-    S: Service<Request<ReqBody>, Response = Response<ResBody>>,
-    ResBody: HttpBody<Data = Bytes> + Send + 'static,
-    ResBody::Error: Into<axum::Error>,
+    S: Service<Request<ReqBody>, Response = Response>,
 {
-    type Response = Response<UnsyncBoxBody<Bytes, axum::Error>>;
+    type Response = Response;
     type Error = S::Error;
     type Future = ResponseFuture<S::Future>;
 
@@ -103,13 +99,11 @@ enum Kind<F> {
     },
 }
 
-impl<F, ResBody, E> Future for ResponseFuture<F>
+impl<F, E> Future for ResponseFuture<F>
 where
-    F: Future<Output = Result<Response<ResBody>, E>>,
-    ResBody: HttpBody<Data = Bytes> + Send + 'static,
-    ResBody::Error: Into<axum::Error>,
+    F: Future<Output = Result<Response, E>>,
 {
-    type Output = Result<Response<UnsyncBoxBody<Bytes, axum::Error>>, E>;
+    type Output = Result<Response, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -122,9 +116,7 @@ where
                 )))
             }
             KindProj::Future { future } => match ready!(future.poll(cx)) {
-                Ok(Ok(res)) => {
-                    Poll::Ready(Ok(res.map(|body| body.map_err(Into::into).boxed_unsync())))
-                }
+                Ok(Ok(res)) => Poll::Ready(Ok(res)),
                 Ok(Err(svc_err)) => Poll::Ready(Err(svc_err)),
                 Err(panic_err) => Poll::Ready(Ok(response_for_panic(
                     this.correlation_id.as_ref(),
@@ -148,7 +140,7 @@ fn message(err: Box<dyn Any + Send + 'static>) -> String {
 fn response_for_panic(
     correlation_id: Option<&CorrelationId>,
     err: Box<dyn Any + Send + 'static>,
-) -> Response<UnsyncBoxBody<Bytes, axum::Error>> {
+) -> Response {
     let mut problem =
         HttpApiProblem::with_title_and_type(StatusCode::INTERNAL_SERVER_ERROR).detail(message(err));
 
