@@ -1,5 +1,5 @@
-ARG DIST_IMAGE=gcr.io/distroless/cc-debian11
-ARG BUILD_IMAGE=rust:1.62-slim-bullseye
+ARG DIST_IMAGE=gcr.io/distroless/cc-debian12
+ARG BUILD_IMAGE=rust:1.78-slim-bookworm
 
 FROM $BUILD_IMAGE as cargo-chef
 WORKDIR app
